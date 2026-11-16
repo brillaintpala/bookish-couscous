@@ -1,6 +1,7 @@
 "use strict";
 
 const http = require("node:http");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const dns = require("node:dns").promises;
@@ -9,6 +10,7 @@ const { once } = require("node:events");
 const cheerio = require("cheerio");
 
 const PORT = Number(process.env.PORT || 10000);
+const ACCESS_KEY = process.env.PROXY_ACCESS_KEY || "";
 const HOST = "0.0.0.0";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MAX_REWRITE_BYTES = 6 * 1024 * 1024;
@@ -22,6 +24,13 @@ const URL_ATTRIBUTES = [
   "href", "src", "action", "formaction", "poster", "data", "cite",
   "background", "manifest", "xlink:href"
 ];
+
+function hasValidAccessKey(value) {
+  if (!ACCESS_KEY) return true;
+  const supplied = Buffer.from(String(value || ""));
+  const expected = Buffer.from(ACCESS_KEY);
+  return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+}
 
 function isBlockedIp(address) {
   const ip = address.toLowerCase().replace(/^\[|\]$/g, "");
@@ -119,25 +128,25 @@ function sourceUrlFromReferer(referer) {
   } catch { return null; }
 }
 
-function proxyPath(value, base) {
+function proxyPath(value, base, accessKey) {
   const raw = String(value || "").trim();
   if (!raw || raw.startsWith("#") || /^(?:data|blob|javascript|mailto|tel|sms|about):/i.test(raw)) return raw;
   try {
     const resolved = new URL(raw, base);
     if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return raw;
-    return "/proxy?url=" + encodeURIComponent(resolved.href);
+    return "/proxy?url=" + encodeURIComponent(resolved.href) + (accessKey ? "&key=" + encodeURIComponent(accessKey) : "");
   } catch { return raw; }
 }
 
-function rewriteCss(css, base) {
+function rewriteCss(css, base, accessKey) {
   return css
     .replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (match, quote, value) =>
-      "url(" + quote + proxyPath(value, base) + quote + ")")
+      "url(" + quote + proxyPath(value, base, accessKey) + quote + ")")
     .replace(/@import\s+(['"])(.*?)\1/gi, (match, quote, value) =>
       "@import " + quote + proxyPath(value, base) + quote);
 }
 
-function rewriteHtml(html, target) {
+function rewriteHtml(html, target, accessKey) {
   const $ = cheerio.load(html, { decodeEntities: false });
   let pageBase = target;
   const originalBase = $("base[href]").first().attr("href");
@@ -149,7 +158,7 @@ function rewriteHtml(html, target) {
   for (const attr of URL_ATTRIBUTES) {
     $("[" + attr + "]").each((_, element) => {
       const current = $(element).attr(attr);
-      if (current) $(element).attr(attr, proxyPath(current, pageBase));
+      if (current) $(element).attr(attr, proxyPath(current, pageBase, accessKey));
     });
   }
 
@@ -165,22 +174,22 @@ function rewriteHtml(html, target) {
   });
 
   $("[style]").each((_, element) => {
-    $(element).attr("style", rewriteCss($(element).attr("style"), pageBase));
+    $(element).attr("style", rewriteCss($(element).attr("style"), pageBase, accessKey));
   });
   $("style").each((_, element) => {
-    $(element).text(rewriteCss($(element).text(), pageBase));
+    $(element).text(rewriteCss($(element).text(), pageBase, accessKey));
   });
 
   $("meta[http-equiv]").each((_, element) => {
     if (String($(element).attr("http-equiv")).toLowerCase() !== "refresh") return;
     const value = $(element).attr("content") || "";
     $(element).attr("content", value.replace(/url\s*=\s*(['"]?)([^'";]+)\1/i,
-      (match, quote, url) => "url=" + quote + proxyPath(url.trim(), pageBase) + quote));
+      (match, quote, url) => "url=" + quote + proxyPath(url.trim(), pageBase, accessKey) + quote));
   });
 
   if (!$("head").length) $("html").prepend("<head></head>");
   const bridge = $("<script></script>")
-    .attr("src", "/bridge.js?base=" + encodeURIComponent(pageBase.href));
+    .attr("src", "/bridge.js?base=" + encodeURIComponent(pageBase.href) + (accessKey ? "&key=" + encodeURIComponent(accessKey) : ""));
   $("head").prepend(bridge);
   return $.html();
 }
@@ -229,7 +238,7 @@ function sendText(res, status, message) {
   res.end(body);
 }
 
-function copyResponseHeaders(req, upstream, target) {
+function copyResponseHeaders(req, upstream, target, accessKey) {
   const headers = {};
   upstream.headers.forEach((value, name) => {
     const key = name.toLowerCase();
@@ -247,7 +256,7 @@ function copyResponseHeaders(req, upstream, target) {
 
   const location = upstream.headers.get("location");
   if (location) {
-    try { headers.location = proxyPath(location, target); } catch { headers.location = location; }
+    try { headers.location = proxyPath(location, target, accessKey); } catch { headers.location = location; }
   }
   corsHeaders(req, { setHeader: (name, value) => { headers[name] = value; } });
   return headers;
@@ -279,6 +288,8 @@ async function pumpLimited(body, limit, res) {
 }
 
 async function handleProxy(req, res, incomingUrl) {
+  const accessKey = incomingUrl.searchParams.get("key") || "";
+  if (!hasValidAccessKey(accessKey)) return sendText(res, 401, "Proxy key required. Enter the configured key in the browser toolbar.");
   const rawTarget = incomingUrl.searchParams.get("url");
   if (!rawTarget || rawTarget.length > 8192) return sendText(res, 400, "Missing or invalid ?url= website address.");
   let target;
@@ -327,7 +338,7 @@ async function handleProxy(req, res, incomingUrl) {
     return sendText(res, 502, "Upstream request failed: " + (error.cause?.message || error.message));
   }
 
-  const responseHeaders = copyResponseHeaders(req, upstream, target);
+  const responseHeaders = copyResponseHeaders(req, upstream, target, accessKey);
   res.writeHead(upstream.status, responseHeaders);
 
   if (req.method === "HEAD" || !upstream.body) return res.end();
@@ -341,7 +352,7 @@ async function handleProxy(req, res, incomingUrl) {
       const body = await pumpLimited(upstream.body, MAX_REWRITE_BYTES, res);
       if (body === null) return;
       const text = body.toString("utf8");
-      const output = shouldRewriteHtml ? rewriteHtml(text, target) : rewriteCss(text, target);
+      const output = shouldRewriteHtml ? rewriteHtml(text, target, accessKey) : rewriteCss(text, target, accessKey);
       res.end(Buffer.from(output));
       return;
     } catch (error) {
