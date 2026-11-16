@@ -2,8 +2,11 @@
   "use strict";
   const script = document.currentScript;
   let currentBase;
+  let accessKey = "";
   try {
-    currentBase = new URL(new URL(script.src).searchParams.get("base"));
+    const bridgeUrl = new URL(script.src);
+    currentBase = new URL(bridgeUrl.searchParams.get("base"));
+    accessKey = bridgeUrl.searchParams.get("key") || "";
   } catch {
     return;
   }
@@ -16,7 +19,8 @@
     try {
       const absolute = new URL(raw, currentBase);
       if (absolute.protocol !== "http:" && absolute.protocol !== "https:") return raw;
-      return proxyPrefix + encodeURIComponent(absolute.href);
+      if (absolute.origin === location.origin && absolute.pathname === "/proxy") return absolute.pathname + absolute.search;
+      return proxyPrefix + encodeURIComponent(absolute.href) + (accessKey ? "&key=" + encodeURIComponent(accessKey) : "");
     } catch {
       return raw;
     }
