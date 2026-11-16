@@ -20,6 +20,7 @@
     .urlbox { display: flex; flex: 1; min-width: 0; gap: 8px; background: #121b30; border: 1px solid #2a3650; padding: 7px; border-radius: 14px; }
     input { flex: 1; min-width: 0; border: 0; outline: 0; color: #edf2ff; background: transparent; padding: 0 9px; font-size: 14px; }
     input::placeholder { color: #74829b; }
+    .keyfield { flex: 0 1 160px; min-width: 0; border: 1px solid #2a3650; border-radius: 12px; background: #121b30; padding: 0 12px; }
     button { border: 1px solid #344361; background: #1b2943; color: #e8edf7; border-radius: 10px; padding: 10px 13px; font: inherit; cursor: pointer; }
     button:hover { background: #263858; }
     button.primary { border-color: #829bff; background: #829bff; color: #091225; font-weight: 750; padding-inline: 18px; }
@@ -36,6 +37,7 @@
       .shell { padding: 12px; gap: 10px; }
       .tag { display: none; }
       .urlbox { gap: 4px; padding: 5px; }
+      .keyfield { flex-basis: 105px; padding: 0 7px; font-size: 11px; }
       input { font-size: 13px; }
       button { padding: 9px 10px; }
       button.primary { padding-inline: 12px; }
@@ -64,6 +66,7 @@
           placeholder="Enter a website, e.g. https://example.com" aria-label="Website address">
         <button type="button" id="reloadBtn" title="Reload">↻</button>
       </div>
+      <input id="accessKey" class="keyfield" type="password" autocomplete="off" placeholder="Proxy key (optional)" aria-label="Proxy access key">
       <button class="primary" type="submit">Go</button>
     </form>
 
@@ -93,6 +96,11 @@
       const dot = document.getElementById("statusDot");
       const status = document.getElementById("statusText");
       const reload = document.getElementById("reloadBtn");
+      const keyField = document.getElementById("accessKey");
+      try { keyField.value = sessionStorage.getItem("bookishProxyKey") || ""; } catch {} 
+      keyField.addEventListener("input", () => {
+        try { sessionStorage.setItem("bookishProxyKey", keyField.value); } catch {}
+      });
 
       function setStatus(label, state) {
         status.textContent = label;
@@ -115,7 +123,8 @@
           const url = normalise(value);
           address.value = url.href;
           setStatus("Connecting to " + url.hostname + "…", "busy");
-          frame.src = "/proxy?url=" + encodeURIComponent(url.href);
+          const key = keyField.value.trim();
+          frame.src = "/proxy?url=" + encodeURIComponent(url.href) + (key ? "&key=" + encodeURIComponent(key) : "");
           const pageUrl = new URL(window.location.href);
           pageUrl.searchParams.set("url", url.href);
           history.replaceState({}, "", pageUrl.pathname + pageUrl.search);
