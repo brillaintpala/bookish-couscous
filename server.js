@@ -143,7 +143,7 @@ function rewriteCss(css, base, accessKey) {
     .replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (match, quote, value) =>
       "url(" + quote + proxyPath(value, base, accessKey) + quote + ")")
     .replace(/@import\s+(['"])(.*?)\1/gi, (match, quote, value) =>
-      "@import " + quote + proxyPath(value, base) + quote);
+      "@import " + quote + proxyPath(value, base, accessKey) + quote);
 }
 
 function rewriteHtml(html, target, accessKey) {
@@ -168,7 +168,7 @@ function rewriteHtml(html, target, accessKey) {
     const rewritten = value.split(",").map(candidate => {
       const trimmed = candidate.trim();
       const match = trimmed.match(/^(\S+)([\s\S]*)$/);
-      return match ? proxyPath(match[1], pageBase) + match[2] : trimmed;
+      return match ? proxyPath(match[1], pageBase, accessKey) + match[2] : trimmed;
     }).join(", ");
     $(element).attr("srcset", rewritten);
   });
