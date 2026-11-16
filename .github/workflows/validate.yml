@@ -1,0 +1,40 @@
+name: Validate proxy browser
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install production dependencies
+        run: npm install --omit=dev
+      - name: Check server syntax
+        run: node --check server.js
+      - name: Check browser bridge syntax
+        run: node --check public/bridge.js
+      - name: Start service and smoke-test routes
+        shell: bash
+        run: |
+          PROXY_ACCESS_KEY=ci-smoke-test npm start > /tmp/bookish-proxy.log 2>&1 &
+          APP_PID=$!
+          trap 'kill "$APP_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..20}; do
+            if curl --silent --fail http://127.0.0.1:10000/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+          grep -q '"ok":true' /tmp/health.json
+          curl --silent --fail http://127.0.0.1:10000/ | grep -q 'Bookish Proxy Browser'
+          curl --silent 'http://127.0.0.1:10000/proxy?url=http%3A%2F%2F127.0.0.1%3A8000&key=ci-smoke-test' | grep -q 'Private and local network addresses are blocked'
+
