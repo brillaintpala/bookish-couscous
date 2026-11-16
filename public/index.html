@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <title>Bookish Proxy Browser</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #0b1020; color: #e8edf7; }
+    .shell { min-height: 100vh; display: flex; flex-direction: column; padding: 20px; gap: 14px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 1500px; width: 100%; margin: 0 auto; }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .mark { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: linear-gradient(135deg,#7c9cff,#9d7bff); color: #081020; font-weight: 900; font-size: 19px; }
+    h1 { margin: 0; font-size: 17px; letter-spacing: -.3px; }
+    .subtitle { margin-top: 3px; color: #92a0b8; font-size: 12px; }
+    .tag { color: #9fb0cb; border: 1px solid #2a3650; padding: 7px 10px; border-radius: 999px; font-size: 11px; white-space: nowrap; }
+    .toolbar { display: flex; gap: 8px; width: 100%; max-width: 1500px; margin: 0 auto; }
+    .urlbox { display: flex; flex: 1; min-width: 0; gap: 8px; background: #121b30; border: 1px solid #2a3650; padding: 7px; border-radius: 14px; }
+    input { flex: 1; min-width: 0; border: 0; outline: 0; color: #edf2ff; background: transparent; padding: 0 9px; font-size: 14px; }
+    input::placeholder { color: #74829b; }
+    button { border: 1px solid #344361; background: #1b2943; color: #e8edf7; border-radius: 10px; padding: 10px 13px; font: inherit; cursor: pointer; }
+    button:hover { background: #263858; }
+    button.primary { border-color: #829bff; background: #829bff; color: #091225; font-weight: 750; padding-inline: 18px; }
+    button:focus-visible, input:focus-visible { outline: 2px solid #9caeff; outline-offset: 2px; }
+    .statusbar { width: 100%; max-width: 1500px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; color: #8493ad; font-size: 11px; gap: 10px; }
+    .status { display: flex; gap: 7px; align-items: center; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #70809a; }
+    .dot.busy { background: #f5c66a; }
+    .dot.ready { background: #70d7a0; }
+    .viewer { flex: 1; min-height: 420px; max-width: 1500px; width: 100%; margin: 0 auto; overflow: hidden; border: 1px solid #2a3650; border-radius: 16px; background: #fff; box-shadow: 0 18px 60px #0005; }
+    iframe { display: block; width: 100%; height: 100%; min-height: 70vh; border: 0; background: #fff; }
+    .note { max-width: 1500px; width: 100%; margin: 0 auto; color: #7888a3; font-size: 11px; line-height: 1.5; }
+    @media (max-width: 640px) {
+      .shell { padding: 12px; gap: 10px; }
+      .tag { display: none; }
+      .urlbox { gap: 4px; padding: 5px; }
+      input { font-size: 13px; }
+      button { padding: 9px 10px; }
+      button.primary { padding-inline: 12px; }
+      .viewer { min-height: 65vh; }
+      iframe { min-height: 65vh; }
+      .note { font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="brand">
+        <div class="mark">B</div>
+        <div>
+          <h1>Bookish Proxy Browser</h1>
+          <div class="subtitle">A server-side HTTP proxy with browser-native rendering</div>
+        </div>
+      </div>
+      <div class="tag">Render · Free-tier ready</div>
+    </header>
+
+    <form class="toolbar" id="navForm">
+      <div class="urlbox">
+        <input id="address" type="text" inputmode="url" autocomplete="url" spellcheck="false"
+          placeholder="Enter a website, e.g. https://example.com" aria-label="Website address">
+        <button type="button" id="reloadBtn" title="Reload">↻</button>
+      </div>
+      <button class="primary" type="submit">Go</button>
+    </form>
+
+    <div class="statusbar">
+      <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">Ready — enter a website address</span></div>
+      <div id="modeText">HTTP / HTTPS proxy</div>
+    </div>
+
+    <section class="viewer">
+      <iframe id="page" title="Proxied website"
+        sandbox="allow-scripts allow-forms allow-downloads allow-popups allow-modals allow-pointer-lock"
+        referrerpolicy="strict-origin-when-cross-origin"></iframe>
+    </section>
+
+    <p class="note">
+      Pages are fetched by this server and rendered by your browser. This is not a full Chromium instance:
+      some sites that require browser fingerprinting, service workers, WebSockets, persistent local storage,
+      or anti-bot clearance may not work. Never enter sensitive credentials on an untrusted site.
+    </p>
+  </main>
+
+  <script>
+    (() => {
+      const form = document.getElementById("navForm");
+      const address = document.getElementById("address");
+      const frame = document.getElementById("page");
+      const dot = document.getElementById("statusDot");
+      const status = document.getElementById("statusText");
+      const reload = document.getElementById("reloadBtn");
+
+      function setStatus(label, state) {
+        status.textContent = label;
+        dot.className = "dot" + (state ? " " + state : "");
+      }
+
+      function normalise(value) {
+        let input = String(value || "").trim();
+        if (!input) throw new Error("Enter a website address.");
+        if (!/^[a-z][a-z0-9+.-]*:/i.test(input)) input = "https://" + input;
+        const url = new URL(input);
+        if (url.protocol !== "http:" && url.protocol !== "https:") {
+          throw new Error("Only HTTP and HTTPS addresses are supported.");
+        }
+        return url;
+      }
+
+      function navigate(value) {
+        try {
+          const url = normalise(value);
+          address.value = url.href;
+          setStatus("Connecting to " + url.hostname + "…", "busy");
+          frame.src = "/proxy?url=" + encodeURIComponent(url.href);
+          const pageUrl = new URL(window.location.href);
+          pageUrl.searchParams.set("url", url.href);
+          history.replaceState({}, "", pageUrl.pathname + pageUrl.search);
+        } catch (error) {
+          setStatus(error.message, "");
+        }
+      }
+
+      form.addEventListener("submit", event => {
+        event.preventDefault();
+        navigate(address.value);
+      });
+      reload.addEventListener("click", () => {
+        if (!frame.src || frame.src === "about:blank") return;
+        setStatus("Reloading page…", "busy");
+        frame.src = frame.src;
+      });
+      frame.addEventListener("load", () => setStatus("Response loaded", "ready"));
+
+      const initial = new URLSearchParams(window.location.search).get("url");
+      if (initial) navigate(initial);
+    })();
+  </script>
+</body>
+</html>
