@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: bookish-couscous
+    name: brilliantpala
     runtime: node
     plan: free
     region: singapore
